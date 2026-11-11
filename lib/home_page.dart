@@ -28,11 +28,7 @@ class HomePage extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Icon(
-                    Icons.home_rounded,
-                    color: Colors.white,
-                    size: 48,
-                  ),
+                  const Icon(Icons.home_rounded, color: Colors.white, size: 48),
                   const SizedBox(height: 8),
                   const Text(
                     'HOME',
@@ -45,7 +41,8 @@ class HomePage extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
                   const Text(
-                    'AT A GLANCE',
+                    'LAB INVENTORY',
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 12,
@@ -53,22 +50,12 @@ class HomePage extends StatelessWidget {
                       letterSpacing: 1,
                     ),
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      _metricTile('142', 'DEVICES'),
-                      const SizedBox(width: 8),
-                      _metricTile('100', 'UP'),
-                      const SizedBox(width: 8),
-                      _metricTile('3', 'DOWN'),
-                    ],
-                  ),
                   const SizedBox(height: 20),
                   _summaryTile(
                     context,
                     icon: Icons.laptop_mac_rounded,
                     title: 'DEVICE',
-                    detail: '3 computers need attention',
+                    detail: 'View current device status',
                     page: const DevicePage(),
                   ),
                   const SizedBox(height: 12),
@@ -76,7 +63,7 @@ class HomePage extends StatelessWidget {
                     context,
                     icon: Icons.settings_rounded,
                     title: 'EQUIPMENT',
-                    detail: '142 registered computers',
+                    detail: 'Manage lab equipment',
                     page: const EquipmentPage(),
                   ),
                   const SizedBox(height: 12),
@@ -84,34 +71,8 @@ class HomePage extends StatelessWidget {
                     context,
                     icon: Icons.work_outline_rounded,
                     title: 'ARCHIVE',
-                    detail: 'Recent maintenance reports',
+                    detail: 'View archived records',
                     page: const ArchivePage(),
-                  ),
-                  const SizedBox(height: 20),
-                  const Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      'RECENT ACTIVITY',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  _activityRow(
-                    Icons.build_circle_outlined,
-                    'PC-09 | ADV.LAB',
-                    'Needs service',
-                    const Color(0xFFFFD43B),
-                  ),
-                  _activityRow(
-                    Icons.check_circle_outline,
-                    'PC-01 | ADV.LAB',
-                    'Maintenance completed',
-                    AppColors.primary,
                   ),
                   const SizedBox(height: 20),
                   OutlinedButton.icon(
@@ -128,69 +89,6 @@ class HomePage extends StatelessWidget {
     );
   }
 
-  Widget _metricTile(String value, String label) {
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 10,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _activityRow(
-    IconData icon,
-    String device,
-    String detail,
-    Color color,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        children: [
-          Icon(icon, color: color, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              device,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          Text(
-            detail,
-            style: const TextStyle(color: Colors.white, fontSize: 11),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _summaryTile(
     BuildContext context, {
     required IconData icon,
@@ -199,16 +97,13 @@ class HomePage extends StatelessWidget {
     required Widget page,
   }) {
     return OutlinedButton(
-      onPressed: () => Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => page),
-      ),
+      onPressed: () =>
+          Navigator.of(context).push(MaterialPageRoute(builder: (_) => page)),
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
         alignment: Alignment.centerLeft,
         side: const BorderSide(color: Colors.white24),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
       child: Row(
         children: [
@@ -229,10 +124,7 @@ class HomePage extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   detail,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
                 ),
               ],
             ),

@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_colors.dart';
 import 'forgot_password_page.dart';
 import 'home_page.dart';
-import 'register_page.dart';
+import 'supabase_config.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (SupabaseConfig.isConfigured) {
+    await Supabase.initialize(
+      url: SupabaseConfig.url,
+      publishableKey: SupabaseConfig.publishableKey,
+    );
+  }
   runApp(const OtorepApp());
 }
 
@@ -20,17 +28,18 @@ class OtorepApp extends StatelessWidget {
       theme: ThemeData(
         fontFamily: 'Arial',
         scaffoldBackgroundColor: AppColors.background,
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: AppColors.primary,
-          brightness: Brightness.dark,
-        ).copyWith(
-          primary: AppColors.primary,
-          secondary: AppColors.primary,
-          surface: AppColors.background,
-          onPrimary: Colors.white,
-          onSecondary: Colors.white,
-          onSurface: Colors.white,
-        ),
+        colorScheme:
+            ColorScheme.fromSeed(
+              seedColor: AppColors.primary,
+              brightness: Brightness.dark,
+            ).copyWith(
+              primary: AppColors.primary,
+              secondary: AppColors.primary,
+              surface: AppColors.background,
+              onPrimary: Colors.white,
+              onSecondary: Colors.white,
+              onSurface: Colors.white,
+            ),
         textButtonTheme: TextButtonThemeData(
           style: TextButton.styleFrom(foregroundColor: Colors.white),
         ),
@@ -47,7 +56,61 @@ class OtorepApp extends StatelessWidget {
           ),
         ),
       ),
-      home: const LoginPage(),
+      home: SupabaseConfig.isConfigured
+          ? const AdminSessionGate()
+          : const LoginPage(),
+    );
+  }
+}
+
+class AdminSessionGate extends StatefulWidget {
+  const AdminSessionGate({super.key});
+
+  @override
+  State<AdminSessionGate> createState() => _AdminSessionGateState();
+}
+
+class _AdminSessionGateState extends State<AdminSessionGate> {
+  late Future<bool> _accessFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _accessFuture = _hasAdminAccess();
+  }
+
+  Future<bool> _hasAdminAccess() async {
+    final client = Supabase.instance.client;
+    final user = client.auth.currentUser;
+    if (user == null) return false;
+    final email = user.email;
+    if (email == null) return false;
+
+    try {
+      final result = await client
+          .from('admin_allowlist')
+          .select('email')
+          .eq('email', email.toLowerCase())
+          .maybeSingle();
+      return result != null;
+    } on PostgrestException {
+      await client.auth.signOut();
+      return false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<bool>(
+      future: _accessFuture,
+      builder: (context, snapshot) {
+        if (snapshot.connectionState != ConnectionState.done) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        return snapshot.data == true ? const HomePage() : const LoginPage();
+      },
     );
   }
 }
@@ -64,6 +127,8 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
+  bool _isLoading = false;
+  String? _statusMessage;
 
   @override
   void dispose() {
@@ -72,14 +137,65 @@ class _LoginPageState extends State<LoginPage> {
     super.dispose();
   }
 
-  void _signIn() {
+  void _showMessage(String message) {
+    if (!mounted) return;
+    setState(() => _statusMessage = message);
+  }
+
+  Future<void> _signIn() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     FocusScope.of(context).unfocus();
 
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const HomePage()),
-    );
+    setState(() {
+      _isLoading = true;
+      _statusMessage = null;
+    });
+
+    try {
+      final client = Supabase.instance.client;
+      final response = await client.auth.signInWithPassword(
+        email: _emailController.text.trim().toLowerCase(),
+        password: _passwordController.text,
+      );
+      final user = response.user;
+      if (user == null) {
+        throw const AuthException('Sign-in did not return a user.');
+      }
+      final email = user.email;
+      if (email == null) throw const AuthException('The account has no email.');
+
+      final admin = await client
+          .from('admin_allowlist')
+          .select('email')
+          .eq('email', email.toLowerCase())
+          .maybeSingle();
+      if (admin == null) {
+        await client.auth.signOut();
+        _showMessage('This Gmail account is not authorized as an admin.');
+        return;
+      }
+
+      if (!mounted) return;
+      Navigator.of(
+        context,
+      ).pushReplacement(MaterialPageRoute(builder: (_) => const HomePage()));
+    } on AuthException catch (error) {
+      _showMessage(error.message);
+    } on PostgrestException {
+      await Supabase.instance.client.auth.signOut();
+      _showMessage(
+        'Could not verify admin access. Check that the Supabase admin_allowlist '
+        'table and its policy are configured.',
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
   }
+
+  bool _isGmail(String value) => RegExp(
+    r'^[A-Z0-9._%+-]+@gmail\.com$',
+    caseSensitive: false,
+  ).hasMatch(value);
 
   String _timeGreeting() {
     final hour = DateTime.now().hour;
@@ -89,9 +205,13 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _forgotPassword() {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ForgotPasswordPage()),
-    );
+    if (!SupabaseConfig.isConfigured) {
+      _showMessage('Connect Supabase before requesting a password reset.');
+      return;
+    }
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ForgotPasswordPage()));
   }
 
   @override
@@ -105,186 +225,204 @@ class _LoginPageState extends State<LoginPage> {
           Positioned.fill(
             child: Opacity(
               opacity: 0.34,
-              child: Image.asset(
-                'lib/otorep_logo.png',
-                fit: BoxFit.contain,
-              ),
+              child: Image.asset('lib/otorep_logo.png', fit: BoxFit.contain),
             ),
           ),
           SafeArea(
             child: Center(
               child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 34, vertical: 24),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                maxWidth: 500,
-                minHeight: size.height - 48,
-              ),
-              child: IntrinsicHeight(
-                child: Container(
-                  padding: EdgeInsets.fromLTRB(
-                    size.width < 380 ? 18 : 30,
-                    38,
-                    size.width < 380 ? 18 : 30,
-                    28,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 34,
+                  vertical: 24,
+                ),
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    maxWidth: 500,
+                    minHeight: size.height - 48,
                   ),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface.withValues(alpha: 0.92),
-                    border: Border.all(
-                      color: AppColors.primary,
-                      width: 3,
-                    ),
-                    borderRadius: BorderRadius.circular(22),
-                  ),
-                  child: Form(
-                    key: _formKey,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const Text(
-                          'OTOREP',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 40,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 4,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'MONITORING & MANAGEMENT SYSTEM',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 11,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 36),
-                        const Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            'Hello',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 62,
-                              height: 0.95,
-                              fontWeight: FontWeight.w400,
-                            ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            _timeGreeting(),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 23,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 46),
-                        _buildField(
-                          controller: _emailController,
-                          icon: Icons.mail_outline,
-                          hint: 'Email address',
-                          keyboardType: TextInputType.emailAddress,
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Enter your email';
-                            }
-                            if (!value.contains('@')) {
-                              return 'Enter a valid email';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 24),
-                        _buildField(
-                          controller: _passwordController,
-                          icon: Icons.lock_outline,
-                          hint: 'Password',
-                          obscureText: _obscurePassword,
-                          suffix: IconButton(
-                            tooltip: _obscurePassword
-                                ? 'Show password'
-                                : 'Hide password',
-                            onPressed: () => setState(
-                              () => _obscurePassword = !_obscurePassword,
-                            ),
-                            icon: Icon(
-                              _obscurePassword
-                                  ? Icons.visibility_off_outlined
-                                  : Icons.visibility_outlined,
-                              color: Colors.white,
-                              size: 20,
-                            ),
-                          ),
-                          validator: (value) =>
-                              value == null || value.length < 6
-                              ? 'Password must be at least 6 characters'
-                              : null,
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton(
-                            onPressed: _forgotPassword,
-                            style: TextButton.styleFrom(
-                              foregroundColor: Colors.white,
-                            ),
-                            child: const Text('Forgot your password?'),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        SizedBox(
-                          width: 176,
-                          height: 50,
-                          child: FilledButton(
-                            onPressed: _signIn,
-                            style: FilledButton.styleFrom(
-                              backgroundColor: AppColors.primary,
-                              foregroundColor: Colors.white,
-                              shape: const StadiumBorder(),
-                              textStyle: const TextStyle(
-                                fontSize: 18,
+                  child: IntrinsicHeight(
+                    child: Container(
+                      padding: EdgeInsets.fromLTRB(
+                        size.width < 380 ? 18 : 30,
+                        38,
+                        size.width < 380 ? 18 : 30,
+                        28,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.surface.withValues(alpha: 0.92),
+                        border: Border.all(color: AppColors.primary, width: 3),
+                        borderRadius: BorderRadius.circular(22),
+                      ),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Text(
+                              'OTOREP',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 40,
                                 fontWeight: FontWeight.w700,
+                                letterSpacing: 4,
                               ),
                             ),
-                            child: const Text('SIGN IN'),
-                          ),
-                        ),
-                        const SizedBox(height: 22),
-                        const Text(
-                          "Don't have an account?",
-                          style: TextStyle(color: Colors.white, fontSize: 12),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const RegisterPage(),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'MONITORING & MANAGEMENT SYSTEM',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                letterSpacing: 0.5,
                               ),
-                            );
-                          },
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
-                          ),
-                          child: const Text(
-                            'REGISTER',
-                            style: TextStyle(
-                              fontWeight: FontWeight.w700,
-                              decoration: TextDecoration.underline,
                             ),
-                          ),
+                            const SizedBox(height: 36),
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Hello',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 62,
+                                  height: 0.95,
+                                  fontWeight: FontWeight.w400,
+                                ),
+                              ),
+                            ),
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                _timeGreeting(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 23,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 32),
+                            _buildField(
+                              controller: _emailController,
+                              icon: Icons.mail_outline,
+                              hint: 'Email address',
+                              keyboardType: TextInputType.emailAddress,
+                              validator: (value) {
+                                if (value == null || value.trim().isEmpty) {
+                                  return 'Enter your email';
+                                }
+                                if (!_isGmail(value.trim())) {
+                                  return 'Enter a valid Gmail address';
+                                }
+                                return null;
+                              },
+                            ),
+                            const SizedBox(height: 18),
+                            _buildField(
+                              controller: _passwordController,
+                              icon: Icons.lock_outline,
+                              hint: 'Password',
+                              obscureText: _obscurePassword,
+                              suffix: IconButton(
+                                tooltip: _obscurePassword
+                                    ? 'Show password'
+                                    : 'Hide password',
+                                onPressed: () => setState(
+                                  () => _obscurePassword = !_obscurePassword,
+                                ),
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_off_outlined
+                                      : Icons.visibility_outlined,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                              ),
+                              validator: (value) =>
+                                  value == null || value.length < 6
+                                  ? 'Password must be at least 6 characters'
+                                  : null,
+                            ),
+                            if (_statusMessage != null) ...[
+                              const SizedBox(height: 14),
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  _statusMessage!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.white),
+                                ),
+                              ),
+                            ],
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton(
+                                onPressed: SupabaseConfig.isConfigured
+                                    ? _forgotPassword
+                                    : null,
+                                child: const Text('Forgot your password?'),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            SizedBox(
+                              width: 176,
+                              height: 50,
+                              child: FilledButton(
+                                onPressed:
+                                    !SupabaseConfig.isConfigured || _isLoading
+                                    ? null
+                                    : _signIn,
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppColors.primary,
+                                  foregroundColor: Colors.white,
+                                  shape: const StadiumBorder(),
+                                  textStyle: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                child: _isLoading
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: Colors.white,
+                                        ),
+                                      )
+                                    : const Text('SIGN IN'),
+                              ),
+                            ),
+                            const SizedBox(height: 22),
+                            if (!SupabaseConfig.isConfigured) ...[
+                              const SizedBox(height: 16),
+                              const Text(
+                                'Connect Supabase to enable secure admin sign-in.',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Colors.white),
+                              ),
+                            ] else ...[
+                              const SizedBox(height: 16),
+                              const Text(
+                                'Admin access only',
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
               ),
             ),
           ),
@@ -354,7 +492,7 @@ class MyApp extends StatelessWidget {
         //
         // This works for code too, not just values: Most code changes can be
         // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
+        colorScheme: .fromSeed(seedColor: AppColors.primary),
       ),
       home: const MyHomePage(title: 'Hello Warduuu!'),
     );

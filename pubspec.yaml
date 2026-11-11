@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.18.3
 
 dev_dependencies:
   flutter_test:
@@ -24,12 +25,12 @@ flutter_launcher_icons:
   image_path: "lib/otorep_logo.png"
 
 flutter_native_splash:
-  color: "#1D1D4B"
+  color: "#111114"
   image: "lib/splash_logo.png"
   android_12:
     image: "lib/splash_logo.png"
-    color: "#1D1D4B"
-    icon_background_color: "#1D1D4B"
+    color: "#111114"
+    icon_background_color: "#111114"
 
 flutter:
   uses-material-design: true

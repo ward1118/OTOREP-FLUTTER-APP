@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_colors.dart';
 import 'page_background.dart';
@@ -13,6 +14,8 @@ class ForgotPasswordPage extends StatefulWidget {
 class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
+  bool _isSending = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -20,16 +23,28 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
     super.dispose();
   }
 
-  void _sendResetLink() {
+  Future<void> _sendResetLink() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     FocusScope.of(context).unfocus();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Password reset instructions sent to ${_emailController.text.trim()}.',
+    setState(() {
+      _isSending = true;
+      _errorMessage = null;
+    });
+    try {
+      await Supabase.instance.client.auth.resetPasswordForEmail(
+        _emailController.text.trim().toLowerCase(),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('If the account exists, a reset email was sent.'),
         ),
-      ),
-    );
+      );
+    } on AuthException catch (error) {
+      if (mounted) setState(() => _errorMessage = error.message);
+    } finally {
+      if (mounted) setState(() => _isSending = false);
+    }
   }
 
   @override
@@ -99,14 +114,32 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                         if (value == null || value.trim().isEmpty) {
                           return 'Enter your email';
                         }
-                        if (!value.contains('@')) return 'Enter a valid email';
+                        if (!RegExp(
+                          r'^[A-Z0-9._%+-]+@gmail\.com$',
+                          caseSensitive: false,
+                        ).hasMatch(value.trim())) {
+                          return 'Enter a valid Gmail address';
+                        }
                         return null;
                       },
                     ),
+                    if (_errorMessage != null) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        _errorMessage!,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ],
                     const SizedBox(height: 24),
                     FilledButton.icon(
-                      onPressed: _sendResetLink,
-                      icon: const Icon(Icons.send_outlined),
+                      onPressed: _isSending ? null : _sendResetLink,
+                      icon: _isSending
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.send_outlined),
                       label: const Text('SEND RESET LINK'),
                     ),
                     const SizedBox(height: 10),

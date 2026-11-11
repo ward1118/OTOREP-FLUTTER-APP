@@ -8,15 +8,9 @@ class ArchivePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const history = [
-      ('PC-09 | ADV.LAB', 'Marked for service', 'Today, 10:42 AM'),
-      ('PC-07 | MAC LAB', 'Updated device details', 'Yesterday, 3:18 PM'),
-      ('PC-01 | ADV.LAB', 'Maintenance completed', 'Sep 20, 2026'),
-    ];
-
     return Scaffold(
       body: OtorepPageBackground(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
             children: [
@@ -41,34 +35,26 @@ class ArchivePage extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 16),
-              Expanded(
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: AppColors.surface.withValues(alpha: 0.92),
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.25)),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  color: AppColors.surface.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(
+                    color: Colors.white.withValues(alpha: 0.25),
                   ),
-                  child: ListView.separated(
-                    itemCount: history.length,
-                    separatorBuilder: (_, _) => const Divider(color: Colors.white24),
-                    itemBuilder: (context, index) {
-                      final entry = history[index];
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: const Icon(Icons.history, color: Colors.white),
-                        title: Text(
-                          entry.$1,
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                        ),
-                        subtitle: Text(
-                          '${entry.$2}\n${entry.$3}',
-                          style: const TextStyle(color: Colors.white, height: 1.4),
-                        ),
-                        isThreeLine: true,
-                      );
-                    },
-                  ),
+                ),
+                child: const Column(
+                  children: [
+                    Icon(Icons.history, color: Colors.white, size: 40),
+                    SizedBox(height: 12),
+                    Text(
+                      'No archived records yet.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ],
                 ),
               ),
             ],

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'app_colors.dart';
+import 'device_repository.dart';
 import 'page_background.dart';
 
 class EquipmentPage extends StatefulWidget {
@@ -11,82 +13,209 @@ class EquipmentPage extends StatefulWidget {
 }
 
 class _EquipmentPageState extends State<EquipmentPage> {
-  final List<String> _devices = [
-    'PC-01 | ADV.LAB',
-    'PC-07 | MAC LAB',
-    'PC-09 | ADV.LAB',
-  ];
-  final List<String> _statuses = ['UP', 'UP', 'WIP'];
+  late final DeviceRepository _repository;
+  List<DeviceRecord> _devices = [];
+  bool _isLoading = true;
+  String? _loadError;
 
-  Future<void> _addDevice() async {
-    final controller = TextEditingController();
-    final device = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Add equipment'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          decoration: const InputDecoration(hintText: 'e.g. PC-10 | ADV.LAB'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('CANCEL'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('ADD'),
-          ),
-        ],
-      ),
-    );
-    controller.dispose();
-    if (device != null && device.isNotEmpty) {
+  @override
+  void initState() {
+    super.initState();
+    _repository = DeviceRepository(Supabase.instance.client);
+    _loadDevices();
+  }
+
+  Future<bool> _loadDevices({bool showLoading = true}) async {
+    if (showLoading && mounted) {
       setState(() {
-        _devices.add(device);
-        _statuses.add('UP');
+        _isLoading = true;
+        _loadError = null;
       });
     }
+    try {
+      final devices = await _repository.list();
+      if (!mounted) return false;
+      setState(() {
+        _devices = devices;
+        _isLoading = false;
+        _loadError = null;
+      });
+      return true;
+    } on Exception catch (error) {
+      if (!mounted) return false;
+      setState(() {
+        _isLoading = false;
+        _loadError = deviceLoadErrorMessage(error);
+      });
+      return false;
+    }
   }
 
-  Future<void> _editDevice(int index) async {
-    final controller = TextEditingController(text: _devices[index]);
-    final device = await showDialog<String>(
+  Future<void> _refreshDevices() async {
+    await _loadDevices();
+  }
+
+  Future<DeviceFormData?> _showDeviceForm({DeviceRecord? device}) async {
+    final formKey = GlobalKey<FormState>();
+    final nameController = TextEditingController(text: device?.name ?? '');
+    final locationController = TextEditingController(
+      text: device?.location ?? '',
+    );
+    final notesController = TextEditingController(text: device?.notes ?? '');
+    var status = device?.status ?? 'UP';
+
+    final result = await showDialog<DeviceFormData>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(device == null ? 'Add device' : 'Edit device'),
+          content: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    controller: nameController,
+                    autofocus: true,
+                    decoration: const InputDecoration(labelText: 'Device name'),
+                    validator: _requiredValidator,
+                  ),
+                  TextFormField(
+                    controller: locationController,
+                    decoration: const InputDecoration(labelText: 'Location'),
+                    validator: _requiredValidator,
+                  ),
+                  DropdownButtonFormField<String>(
+                    initialValue: status,
+                    decoration: const InputDecoration(labelText: 'Status'),
+                    items: const [
+                      DropdownMenuItem(value: 'UP', child: Text('UP')),
+                      DropdownMenuItem(value: 'WIP', child: Text('WIP')),
+                      DropdownMenuItem(value: 'DOWN', child: Text('DOWN')),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() => status = value);
+                      }
+                    },
+                  ),
+                  TextFormField(
+                    controller: notesController,
+                    decoration: const InputDecoration(labelText: 'Notes'),
+                    maxLines: 2,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('CANCEL'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (!(formKey.currentState?.validate() ?? false)) return;
+                final notes = notesController.text.trim();
+                Navigator.pop(context, (
+                  name: nameController.text.trim(),
+                  location: locationController.text.trim(),
+                  status: status,
+                  notes: notes.isEmpty ? null : notes,
+                ));
+              },
+              child: Text(device == null ? 'ADD' : 'SAVE'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    nameController.dispose();
+    locationController.dispose();
+    notesController.dispose();
+    return result;
+  }
+
+  String? _requiredValidator(String? value) =>
+      value == null || value.trim().isEmpty ? 'This field is required' : null;
+
+  Future<void> _addDevice() async {
+    final device = await _showDeviceForm();
+    if (device == null) return;
+    await _performDeviceAction(
+      () => _repository.add(device),
+      successMessage: 'Device added.',
+    );
+  }
+
+  Future<void> _editDevice(DeviceRecord current) async {
+    final device = await _showDeviceForm(device: current);
+    if (device == null) return;
+    await _performDeviceAction(
+      () => _repository.update(current.id, device),
+      successMessage: 'Device updated.',
+    );
+  }
+
+  Future<void> _deleteDevice(DeviceRecord device) async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Edit equipment'),
-        content: TextField(controller: controller, autofocus: true),
+        title: const Text('Delete device?'),
+        content: Text('Delete ${device.name} from ${device.location}?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text('CANCEL'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('UPDATE'),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('DELETE'),
           ),
         ],
       ),
     );
-    controller.dispose();
-    if (device != null && device.isNotEmpty) {
-      setState(() => _devices[index] = device);
+    if (confirmed != true) return;
+    await _performDeviceAction(
+      () => _repository.delete(device.id),
+      successMessage: 'Device deleted.',
+    );
+  }
+
+  Future<void> _setStatus(DeviceRecord device, String status) async {
+    await _performDeviceAction(
+      () => _repository.update(device.id, (
+        name: device.name,
+        location: device.location,
+        status: status,
+        notes: device.notes,
+      )),
+      successMessage: 'Device status updated.',
+    );
+  }
+
+  Future<void> _performDeviceAction(
+    Future<void> Function() action, {
+    required String successMessage,
+  }) async {
+    try {
+      await action();
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(successMessage)));
+      await _loadDevices(showLoading: false);
+    } on Exception catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Device update failed: $error')));
     }
   }
 
-  void _deleteDevice(int index) {
-    setState(() {
-      _devices.removeAt(index);
-      _statuses.removeAt(index);
-    });
-  }
-
-  void _setStatus(int index, String status) {
-    setState(() => _statuses[index] = status);
-  }
-
-  Future<void> _showDeviceActions(int index) async {
+  Future<void> _showDeviceActions(DeviceRecord device) async {
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (context) => SafeArea(
@@ -126,11 +255,11 @@ class _EquipmentPageState extends State<EquipmentPage> {
 
     if (!mounted || action == null) return;
     if (action == 'edit') {
-      await _editDevice(index);
+      await _editDevice(device);
     } else if (action == 'delete') {
-      _deleteDevice(index);
+      await _deleteDevice(device);
     } else {
-      _setStatus(index, action);
+      await _setStatus(device, action);
     }
   }
 
@@ -139,7 +268,7 @@ class _EquipmentPageState extends State<EquipmentPage> {
       case 'UP':
         return AppColors.primary;
       case 'WIP':
-        return const Color(0xFFFFD43B);
+        return AppColors.secondary;
       default:
         return const Color(0xFFFF4F4F);
     }
@@ -188,40 +317,111 @@ class _EquipmentPageState extends State<EquipmentPage> {
                     borderRadius: BorderRadius.circular(24),
                     border: Border.all(color: Colors.white24),
                   ),
-                  child: ListView.separated(
-                    itemCount: _devices.length,
-                    separatorBuilder: (_, _) => const Divider(color: Colors.white24),
-                    itemBuilder: (context, index) => ListTile(
-                      contentPadding: EdgeInsets.zero,
-                      leading: const Icon(Icons.computer, color: Colors.white),
-                      title: Text(
-                        _devices[index],
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-                      ),
-                      subtitle: Row(
-                        children: [
-                          Icon(
-                            Icons.flag,
-                            color: _statusColor(_statuses[index]),
-                            size: 16,
+                  child: _isLoading
+                      ? const Center(child: CircularProgressIndicator())
+                      : _loadError != null
+                      ? Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _loadError!,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white),
+                              ),
+                              const SizedBox(height: 12),
+                              FilledButton.icon(
+                                onPressed: _refreshDevices,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('RETRY'),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 6),
-                          Text(
-                            _statuses[index],
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                      trailing: IconButton(
-                        onPressed: () => _showDeviceActions(index),
-                        tooltip: 'Manage equipment',
-                        icon: const Icon(Icons.more_vert, color: Colors.white),
-                      ),
-                    ),
-                  ),
+                        )
+                      : RefreshIndicator(
+                          onRefresh: _refreshDevices,
+                          child: _devices.isEmpty
+                              ? ListView(
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
+                                  children: const [
+                                    SizedBox(height: 120),
+                                    Icon(
+                                      Icons.devices_other,
+                                      color: Colors.white,
+                                      size: 44,
+                                    ),
+                                    SizedBox(height: 12),
+                                    Text(
+                                      'No devices yet. Tap + to add one.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(color: Colors.white),
+                                    ),
+                                  ],
+                                )
+                              : ListView.separated(
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
+                                  itemCount: _devices.length,
+                                  separatorBuilder: (_, _) =>
+                                      const Divider(color: Colors.white24),
+                                  itemBuilder: (context, index) {
+                                    final device = _devices[index];
+                                    return ListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: const Icon(
+                                        Icons.computer,
+                                        color: Colors.white,
+                                      ),
+                                      title: Text(
+                                        '${device.name} | ${device.location}',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      subtitle: Row(
+                                        children: [
+                                          Icon(
+                                            Icons.flag,
+                                            color: _statusColor(device.status),
+                                            size: 16,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            device.status,
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          if (device.notes != null) ...[
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: Text(
+                                                device.notes!,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                      trailing: IconButton(
+                                        onPressed: () =>
+                                            _showDeviceActions(device),
+                                        tooltip: 'Manage device',
+                                        icon: const Icon(
+                                          Icons.more_vert,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    );
+                                  },
+                                ),
+                        ),
                 ),
               ),
             ],
